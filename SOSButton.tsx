@@ -1,12 +1,11 @@
 // components/SOSButton.tsx
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   Animated,
   Easing,
-  Alert,
   StyleSheet,
   StyleProp,
   ViewStyle,
@@ -33,29 +32,9 @@ type SOSButtonProps = {
   onSOSTriggered: () => void;
 };
 
-type Ripple = {
-  id: number;
-  progress: Animated.Value;
-};
-
 export default function SOSButton({ onSOSTriggered }: SOSButtonProps) {
-  const [counting, setCounting] = useState(false);
-  const [count, setCount] = useState(3);
-  const [ripples, setRipples] = useState<Ripple[]>([]);
   const pulseAnim = useRef(new Animated.Value(0)).current;
-  const rippleId = useRef(0);
-
-  /** Countdown Logic */
-  useEffect(() => {
-    let timer: ReturnType<typeof setTimeout>;
-    if (counting && count > 0) {
-      timer = setTimeout(() => setCount(count - 1), 1000);
-    } else if (count === 0) {
-      triggerSOS();
-      setCounting(false);
-    }
-    return () => clearTimeout(timer);
-  }, [counting, count]);
+  const [isSending, setIsSending] = useState(false);
 
   /** Infinite pulse animation for SOS button */
   useEffect(() => {
@@ -63,14 +42,14 @@ export default function SOSButton({ onSOSTriggered }: SOSButtonProps) {
       Animated.sequence([
         Animated.timing(pulseAnim, {
           toValue: 1,
-          duration: 1500,
-          easing: Easing.out(Easing.ease),
+          duration: 1000,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnim, {
           toValue: 0,
-          duration: 1500,
-          easing: Easing.in(Easing.ease),
+          duration: 1000,
+          easing: Easing.inOut(Easing.ease),
           useNativeDriver: true,
         }),
       ])
@@ -79,60 +58,21 @@ export default function SOSButton({ onSOSTriggered }: SOSButtonProps) {
     return () => pulseLoop.stop();
   }, [pulseAnim]);
 
-  /** Continuous ripple animation */
-  useEffect(() => {
-    if (!counting) {
-      const rippleInterval = setInterval(createRipple, 2000);
-      return () => clearInterval(rippleInterval);
-    }
-  }, [counting]);
-
-  /** Start countdown */
-  const startCountdown = () => {
-    setCounting(true);
-    setCount(3);
-  };
-
-  /** Create ripple animation */
-  const createRipple = () => {
-    const id = rippleId.current++;
-    const progress = new Animated.Value(0);
-
-    setRipples((prev) => [...prev, { id, progress }]);
-
-    Animated.timing(progress, {
-      toValue: 1,
-      duration: 2000,
-      easing: Easing.out(Easing.ease),
-      useNativeDriver: true,
-    }).start(() => {
-      setRipples((prev) => prev.filter((r) => r.id !== id));
-    });
-  };
-
-  /** Cancel SOS */
-  const cancelSOS = () => {
-    setCounting(false);
-    Toast.show({ type: 'info', text1: 'SOS Cancelled' });
-  };
-
   /** Trigger SOS */
   const triggerSOS = async () => {
+    if (isSending) return;
+    setIsSending(true);
     Toast.show({ type: 'success', text1: 'Sending SOS...' });
 
     let rawLocation = null;
     try {
       rawLocation = await getCurrentLocation();
     } catch {
-      Alert.alert('Warning', 'Unable to get location. SOS sent without location.');
+      Toast.show({ type: 'info', text1: 'Location unavailable, sending anyway.' });
     }
 
     const location = rawLocation
-      ? {
-          lat: rawLocation.lat,
-          lng: rawLocation.lng,
-          accuracy: rawLocation.accuracy ?? undefined,
-        }
+      ? { lat: rawLocation.lat, lng: rawLocation.lng, accuracy: rawLocation.accuracy ?? undefined }
       : { lat: 0, lng: 0 };
 
     const sosPayload = {
@@ -151,67 +91,38 @@ export default function SOSButton({ onSOSTriggered }: SOSButtonProps) {
     } catch (err) {
       console.error('Error adding SOS:', err);
       Toast.show({ type: 'error', text1: 'Failed to queue SOS' });
+    } finally {
+      setTimeout(() => setIsSending(false), 2000);
     }
   };
 
-  /** Countdown overlay */
-  if (counting) {
-    return (
-      <View style={styles.countdownOverlay as StyleProp<ViewStyle>}>
-        <Text style={styles.countdownText as StyleProp<TextStyle>}>{count}</Text>
-        <TouchableOpacity onPress={cancelSOS} style={styles.cancelButton as StyleProp<ViewStyle>}>
-          <Text style={styles.cancelButtonText as StyleProp<TextStyle>}>CANCEL</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  /** Animated pulse style */
+  const animatedStyle = {
+    transform: [
+      {
+        scale: pulseAnim.interpolate({
+          inputRange: [0, 1],
+          outputRange: [1, 1.15],
+        }),
+      },
+    ],
+    shadowOpacity: pulseAnim.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0.3, 0.7],
+    }),
+  };
 
-  /** Default SOS button with ripples */
   return (
     <View style={styles.buttonContainer as StyleProp<ViewStyle>}>
-      {ripples.map((r) => (
-        <Animated.View
-          key={r.id}
-          style={[
-            styles.ripple as StyleProp<ViewStyle>,
-            {
-              transform: [
-                {
-                  scale: r.progress.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [0.8, 2.5],
-                  }),
-                },
-              ],
-              opacity: r.progress.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.7, 0],
-              }),
-            },
-          ]}
-        />
-      ))}
-
-      <Animated.View
-        style={[
-          styles.pulseRing as StyleProp<ViewStyle>,
-          {
-            transform: [
-              {
-                scale: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 1.2] }),
-              },
-            ],
-            opacity: pulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0.7, 0] }),
-          },
-        ]}
-      />
-
+      <Animated.View style={[styles.pulseRing as StyleProp<ViewStyle>, animatedStyle]} />
       <TouchableOpacity
-        onPress={startCountdown}
-        style={styles.button as StyleProp<ViewStyle>}
-        activeOpacity={0.7}
+        onPress={triggerSOS}
+        style={[styles.button as StyleProp<ViewStyle>, isSending && styles.disabledButton]}
+        activeOpacity={0.8}
       >
-        <Text style={styles.buttonText as StyleProp<TextStyle>}>SOS</Text>
+        <Text style={styles.buttonText as StyleProp<TextStyle>}>
+          {isSending ? 'Sending...' : 'SOS'}
+        </Text>
       </TouchableOpacity>
     </View>
   );
@@ -227,67 +138,30 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   button: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
+    width: 100,
+    height: 100,
+    borderRadius: 50,
     backgroundColor: '#EF4444',
     justifyContent: 'center',
     alignItems: 'center',
     elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    zIndex: 2,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 0 },
+    shadowRadius: 10,
+  },
+  disabledButton: {
+    opacity: 0.8,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
-  },
-  ripple: {
-    position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    zIndex: 1,
   },
   pulseRing: {
     position: 'absolute',
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    borderWidth: 4,
-    borderColor: 'rgba(255, 255, 255, 0.7)',
-    zIndex: 0,
-  },
-  countdownOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 999,
-  },
-  countdownText: {
-    fontSize: 64,
-    color: '#fff',
-    fontWeight: 'bold',
-  },
-  cancelButton: {
-    marginTop: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    backgroundColor: '#EF4444',
-    borderRadius: 8,
-  },
-  cancelButtonText: {
-    color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
   },
 });
